@@ -1006,7 +1006,9 @@ export class ScraperManager {
       // const result = JSON.stringify(validScrapeResult);
 
       // fs.writeFileSync("debug/validScrapeResult.json", result);
-      const currentTicketCount = validScrapeResult.length;
+      const currentTicketCount = validScrapeResult.reduce(
+        (sum, group) => sum + (group.inventory?.quantity || 0), 0
+      );
 
         // Quick update of basic info
         await Event.updateOne(

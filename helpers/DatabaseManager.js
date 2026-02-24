@@ -51,7 +51,9 @@ class DatabaseManager {
         }
 
         const previousTicketCount = event.Available_Seats || 0;
-        const currentTicketCount = scrapeResult.length;
+        const currentTicketCount = scrapeResult.reduce(
+          (sum, group) => sum + (group.inventory?.quantity || 0), 0
+        );
 
         const metadata = {
           lastUpdate: moment().format("YYYY-MM-DD HH:mm:ss"),
