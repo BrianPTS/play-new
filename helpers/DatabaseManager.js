@@ -55,6 +55,18 @@ class DatabaseManager {
           (sum, group) => sum + (group.inventory?.quantity || 0), 0
         );
 
+        // Calculate per-type seat and row counts
+        const standardSeats = scrapeResult
+          .filter(g => g.inventory?.splitType === 'NEVERLEAVEONE')
+          .reduce((sum, g) => sum + (g.inventory?.quantity || 0), 0);
+        const resaleSeats = scrapeResult
+          .filter(g => g.inventory?.splitType !== 'NEVERLEAVEONE')
+          .reduce((sum, g) => sum + (g.inventory?.quantity || 0), 0);
+        const standardRows = scrapeResult
+          .filter(g => g.inventory?.splitType === 'NEVERLEAVEONE').length;
+        const resaleRows = scrapeResult
+          .filter(g => g.inventory?.splitType !== 'NEVERLEAVEONE').length;
+
         const metadata = {
           lastUpdate: moment().format("YYYY-MM-DD HH:mm:ss"),
           iterationNumber: (event.metadata?.iterationNumber || 0) + 1,
@@ -72,6 +84,10 @@ class DatabaseManager {
           {
             $set: {
               Available_Seats: currentTicketCount,
+              Standard_Seats: standardSeats,
+              Resale_Seats: resaleSeats,
+              Standard_Rows: standardRows,
+              Resale_Rows: resaleRows,
               Last_Updated: new Date(),
               "metadata.basic": metadata,
             },

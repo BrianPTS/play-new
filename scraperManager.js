@@ -1010,12 +1010,28 @@ export class ScraperManager {
         (sum, group) => sum + (group.inventory?.quantity || 0), 0
       );
 
+      // Calculate per-type seat and row counts
+      const standardSeats = validScrapeResult
+        .filter(g => g.inventory?.splitType === 'NEVERLEAVEONE')
+        .reduce((sum, g) => sum + (g.inventory?.quantity || 0), 0);
+      const resaleSeats = validScrapeResult
+        .filter(g => g.inventory?.splitType !== 'NEVERLEAVEONE')
+        .reduce((sum, g) => sum + (g.inventory?.quantity || 0), 0);
+      const standardRows = validScrapeResult
+        .filter(g => g.inventory?.splitType === 'NEVERLEAVEONE').length;
+      const resaleRows = validScrapeResult
+        .filter(g => g.inventory?.splitType !== 'NEVERLEAVEONE').length;
+
         // Quick update of basic info
         await Event.updateOne(
           { Event_ID: eventId },
           {
             $set: {
               Available_Seats: currentTicketCount,
+              Standard_Seats: standardSeats,
+              Resale_Seats: resaleSeats,
+              Standard_Rows: standardRows,
+              Resale_Rows: resaleRows,
               Last_Updated: new Date(), // Ensure Last_Updated is always set to now
               "metadata.lastUpdate": new Date(),
               "metadata.ticketCount": currentTicketCount,

@@ -33,6 +33,22 @@ const eventSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    Standard_Seats: {
+      type: Number,
+      default: 0,
+    },
+    Resale_Seats: {
+      type: Number,
+      default: 0,
+    },
+    Standard_Rows: {
+      type: Number,
+      default: 0,
+    },
+    Resale_Rows: {
+      type: Number,
+      default: 0,
+    },
     Skip_Scraping: {
       type: Boolean,
       default: true,
