@@ -1020,6 +1020,52 @@ async function callTicketmasterAPI(facetHeader, proxyAgent, eventId, event, mapH
     
     // Both APIs successful — proceed with data processing
 
+    // Debug: dump raw offer objects to see exactly what TM sends
+    // Writes once per event to debug/offers_{eventId}.json
+    try {
+      const debugDir = './debug';
+      if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
+      const offerDebugPath = `${debugDir}/offers_${eventId}.json`;
+      if (!fs.existsSync(offerDebugPath)) {
+        const rawOffers = DataFacets?._embedded?.offer || [];
+        const debugPayload = {
+          eventId,
+          capturedAt: new Date().toISOString(),
+          offerCount: rawOffers.length,
+          offers: rawOffers.map((o, idx) => ({
+            _index: idx,
+            offerId: o.offerId,
+            name: o.name,
+            description: o.description,
+            inventoryType: o.inventoryType,
+            faceValue: o.faceValue,
+            totalPrice: o.totalPrice,
+            listPrice: o.listPrice,
+            charges: o.charges,
+            currency: o.currency,
+            protected: o.protected,
+            ticketTypeUnsoldQualifier: o.ticketTypeUnsoldQualifier,
+            // Capture ALL top-level keys so we can see what else TM sends
+            _allKeys: Object.keys(o),
+          })),
+          // Also capture a sample of the raw facets to see offer references
+          sampleFacet: DataFacets?.facets?.[0] ? {
+            section: DataFacets.facets[0].section,
+            row: DataFacets.facets[0].row,
+            offers: DataFacets.facets[0].offers,
+            inventoryTypes: DataFacets.facets[0].inventoryTypes,
+            offerTypes: DataFacets.facets[0].offerTypes,
+            _allKeys: Object.keys(DataFacets.facets[0]),
+          } : null,
+        };
+        fs.writeFileSync(offerDebugPath, JSON.stringify(debugPayload, null, 2));
+        console.log(`[Debug] Raw offer data written to ${offerDebugPath} (${rawOffers.length} offers)`);
+      }
+    } catch (debugErr) {
+      // Never let debug logging break the scrape
+      console.warn(`[Debug] Failed to write offer debug file: ${debugErr.message}`);
+    }
+
     // Handle the case where we have partial data
     try {
       const result = AttachRowSection(
