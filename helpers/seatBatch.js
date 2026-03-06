@@ -265,29 +265,39 @@ function CreateInventoryAndLine(data, offer, event, descriptions) {
     }
   }
 
-  /*
-  let totalCost=parseFloat(offer?.charges.reduce((total, item) => total + item.amount, 0)+offer?.faceValue);
-  let totalCostWithPercentage=totalCost+(totalCost*(event?.listCostPercentage/100));
-  */
-  //Get Fee which won't multiply
-  let singleExtraCharges = parseFloat(
-    parseFloat(
-      offer?.charges
-        .filter((x) => x?.reason == "order_processing")
-        .reduce((total, item) => total + item.amount, 0)
-    ) / data?.seats.length
-  );
-  //let singleExtraCharges=parseFloat(parseFloat(offer?.charges.filter(x=>x?.reason=="order_processing").reduce((total, item) => total + item.amount, 0)));
-  //console.log(parseFloat(parseFloat(offer?.charges.filter(x=>x?.reason=="order_processing").reduce((total, item) => total + item.amount, 0))))
-  //Remove single fee's
-  let repeatExtraCharges = parseFloat(
-    offer?.charges
-      .filter((x) => x?.reason != "order_processing")
+  // Classify charges using TM's fee_type field when available, falling back to reason-based logic.
+  // TM charge objects can include: { reason, type, amount, fee_type }
+  //   fee_type: "PER ORDER" (split across seats) or "PER TICKET" (applied to each seat)
+  //   Known reasons: order_processing, service, facility, delivery, service_tax, face_value_tax, service_tax_2
+  const charges = offer?.charges || [];
+
+  // Per-order fees: use fee_type if present, otherwise fall back to known per-order reasons
+  let perOrderTotal = parseFloat(
+    charges
+      .filter((x) =>
+        x?.fee_type
+          ? x.fee_type === "PER ORDER"
+          : x?.reason === "order_processing" || x?.reason === "delivery"
+      )
       .reduce((total, item) => total + item.amount, 0)
   );
-  //Face Value
+  let perOrderPerSeat = perOrderTotal / data?.seats.length;
+
+  // Per-ticket fees: everything that is NOT per-order
+  let perTicketTotal = parseFloat(
+    charges
+      .filter((x) =>
+        x?.fee_type
+          ? x.fee_type !== "PER ORDER"
+          : x?.reason !== "order_processing" && x?.reason !== "delivery"
+      )
+      .reduce((total, item) => total + item.amount, 0)
+  );
+
+  // Face Value (true TM face value before any fees)
   let faceValue = offer?.faceValue;
-  let totalCost = singleExtraCharges + repeatExtraCharges + faceValue;
+  let totalFees = perOrderPerSeat + perTicketTotal;
+  let totalCost = faceValue + totalFees;
 
   return {
     inventory: {
@@ -309,6 +319,8 @@ function CreateInventoryAndLine(data, offer, event, descriptions) {
       splitType: offer?.inventoryType?.toLowerCase() === "resale" ? "DEFAULT": "NEVERLEAVEONE" ,
       publicNotes: "xfer" + allDescriptions,
       listPrice: totalCost,
+      originalFaceValue: faceValue,
+      totalFees: totalFees,
       customSplit: getSplitType(data?.seats, offer),
       tickets: data?.seats.map((y) => {
         return {
@@ -316,7 +328,7 @@ function CreateInventoryAndLine(data, offer, event, descriptions) {
           seatNumber: y,
           notes: "string",
           cost: totalCost,
-          faceValue: totalCost,
+          faceValue: faceValue,
           taxedCost: totalCost,
           sellPrice: totalCost,
           stockType: "HARD",

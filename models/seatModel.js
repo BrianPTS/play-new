@@ -165,6 +165,12 @@ const consecutiveGroupSchema = new mongoose.Schema(
         type: Number,
         required: true,
       },
+      originalFaceValue: {
+        type: Number,
+      },
+      totalFees: {
+        type: Number,
+      },
       customSplit: {
         type: String,
       },
