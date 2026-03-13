@@ -77,11 +77,11 @@ function extractListingId(offerId) {
  * @param {Array} facets - Raw facets array from the ISMDS API response
  * @param {Object} options
  * @param {number} options.clusterGap - Max gap between listing IDs to be considered same cluster (default: 100)
- * @param {number} options.minClusterSize - Min listings in a cluster to flag as broker (default: 3)
+ * @param {number} options.minClusterSize - Min listings in a cluster to flag as broker (default: 2)
  * @returns {Map<string, string>} Map of offerId -> "verified_resale" | "3rd_party_resale"
  */
 export function classifyResaleListings(facets, options = {}) {
-  const { clusterGap = 100, minClusterSize = 3 } = options;
+  const { clusterGap = 100, minClusterSize = 2 } = options;
 
   // Step 1: Extract listing IDs from all resale facets
   const offerListingMap = new Map(); // offerId -> listingId
