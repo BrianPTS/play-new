@@ -210,7 +210,7 @@ function getSplitType(arr, offer) {
   }
 }
 
-function CreateInventoryAndLine(data, offer, event, descriptions) {
+function CreateInventoryAndLine(data, offer, event, descriptions, resaleClassification = new Map()) {
 
   let _descriptions = descriptions.find(
     (x) => x.descriptionId == data?.descriptionId
@@ -317,6 +317,9 @@ function CreateInventoryAndLine(data, offer, event, descriptions) {
       tags: "AWS",
       offerId: data?.offerId,
       splitType: offer?.inventoryType?.toLowerCase() === "resale" ? "DEFAULT": "NEVERLEAVEONE" ,
+      resaleType: offer?.inventoryType?.toLowerCase() === "resale"
+        ? (resaleClassification.get(data?.offerId) || "unknown")
+        : null,
       publicNotes: "xfer" + allDescriptions,
       listPrice: totalCost,
       originalFaceValue: faceValue,
@@ -356,7 +359,8 @@ export const AttachRowSection = (
   mapData,
   offers,
   event,
-  descriptions
+  descriptions,
+  resaleClassification = new Map()
 ) => {
   let allAvailableSeats = GetMapSeats(mapData);
   let mapPlacesIndex = allAvailableSeats.map((x) => x.seatId);
@@ -605,7 +609,7 @@ export const AttachRowSection = (
           } else if (offerGet?.protected == true) {
             return undefined;
           } else {
-            return CreateInventoryAndLine(x, offerGet, event, descriptions);
+            return CreateInventoryAndLine(x, offerGet, event, descriptions, resaleClassification);
           }
         } else {
           return undefined;
