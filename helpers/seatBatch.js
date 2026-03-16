@@ -216,11 +216,13 @@ function CreateInventoryAndLine(data, offer, event, descriptions, resaleClassifi
     (x) => x.descriptionId == data?.descriptionId
   );
   let allDescriptions = "";
-  let isNameAdded = false;
+  const tags = new Set(); // track what we already appended to avoid duplicates
 
-  if (data.attributes.includes("obstructed")) {
+  // Case-insensitive check on attributes array
+  const attrsLower = (data.attributes || []).map((a) => a.toLowerCase());
+  if (attrsLower.some((a) => a.includes("obstructed"))) {
     allDescriptions += ", Obstructed View";
-    isNameAdded = true;
+    tags.add("obstructed");
   }
 
   if (
@@ -228,41 +230,64 @@ function CreateInventoryAndLine(data, offer, event, descriptions, resaleClassifi
     data?.accessibility.includes("hearing")
   ) {
     allDescriptions += ", deaf/hard, blind/low";
-    isNameAdded = true;
+    tags.add("accessibility");
   }
 
-  if (offer?.name?.toLowerCase().includes("limited/obstructed")) {
-    allDescriptions += ", Limted/Obstructed View";
-    isNameAdded = true;
-  } else if (offer?.name?.toLowerCase().includes("limited view")) {
-    allDescriptions += ", Limited View";
-    isNameAdded = true;
-  }
-
-  if (isNameAdded == false) {
-    if (_descriptions) {
-      _descriptions.descriptions.map((x) => {
-        // need to make it better it is not good way to check
-        if (x.toLowerCase().includes("side view")) {
-          allDescriptions += ", Side View";
-        } else if (x.toLowerCase().includes("behind")) {
-          allDescriptions += ", Behind The Stage";
-        } else if (x.toLowerCase().includes("rear")) {
-          allDescriptions += ", Rear View Seating";
-        } else if (x.toLowerCase().includes("partial")) {
-          allDescriptions += ", Partial View";
-        } else if (x.toLowerCase().includes("limited")) {
-          allDescriptions += ", Limited View";
-        } else if (x.toLowerCase().includes("obstructed")) {
-          allDescriptions += ", obstructed View";
-        } else if (
-          x.toLowerCase().includes("deaf") ||
-          x.toLowerCase().includes("blind")
-        ) {
-          allDescriptions += ", deaf/hard, blind/low";
-        }
-      });
+  // Check offer name (case-insensitive)
+  const offerNameLower = offer?.name?.toLowerCase() || "";
+  if (offerNameLower.includes("limited/obstructed")) {
+    if (!tags.has("obstructed")) {
+      allDescriptions += ", Limited/Obstructed View";
+      tags.add("obstructed");
     }
+    if (!tags.has("limited")) {
+      allDescriptions += ", Limited View";
+      tags.add("limited");
+    }
+  } else {
+    if (offerNameLower.includes("obstructed") && !tags.has("obstructed")) {
+      allDescriptions += ", Obstructed View";
+      tags.add("obstructed");
+    }
+    if (offerNameLower.includes("limited view") && !tags.has("limited")) {
+      allDescriptions += ", Limited View";
+      tags.add("limited");
+    }
+  }
+
+  // Always check descriptions for anything not yet tagged
+  if (_descriptions) {
+    _descriptions.descriptions.map((x) => {
+      const xl = x.toLowerCase();
+      if (xl.includes("obstructed") && !tags.has("obstructed")) {
+        allDescriptions += ", Obstructed View";
+        tags.add("obstructed");
+      }
+      if (xl.includes("limited") && !tags.has("limited")) {
+        allDescriptions += ", Limited View";
+        tags.add("limited");
+      }
+      if (xl.includes("side view") && !tags.has("side")) {
+        allDescriptions += ", Side View";
+        tags.add("side");
+      }
+      if (xl.includes("behind") && !tags.has("behind")) {
+        allDescriptions += ", Behind The Stage";
+        tags.add("behind");
+      }
+      if (xl.includes("rear") && !tags.has("rear")) {
+        allDescriptions += ", Rear View Seating";
+        tags.add("rear");
+      }
+      if (xl.includes("partial") && !tags.has("partial")) {
+        allDescriptions += ", Partial View";
+        tags.add("partial");
+      }
+      if ((xl.includes("deaf") || xl.includes("blind")) && !tags.has("accessibility")) {
+        allDescriptions += ", deaf/hard, blind/low";
+        tags.add("accessibility");
+      }
+    });
   }
 
   // Classify charges using TM's fee_type field when available, falling back to reason-based logic.
