@@ -11,20 +11,28 @@ const GLOBAL_FILTERS = {
 
 
   description: [
-    
+
     "Standard Ticket",
     "GA Lawn",
     "General Admission Standing",
     "Standard Admission",
     "Reserved",
     "Reserved Ticket"
-    
+
   ], // e.g., ['obstructed view', 'aisle'] - empty means no filter, strings to check for (case-insensitive)
   accessibility: [
     // Empty array means exclude ALL accessibility seats
   ], // e.g., ['wheelchair', 'hearing'] - empty means no filter, strings to check for (case-insensitive)
   excludeAccessibility: true, // Set to true to exclude ALL accessibility seats
   excludeWheelchair: true, // Set to true to exclude wheelchair accessible seats (sections containing 'WC')
+
+  // Section density filter: exclude sections where available listings are below this
+  // percentage of total section capacity. Set to 0 to disable.
+  // Example: 0.10 = exclude sections with less than 10% of seats available
+  sectionDensityThreshold: 0.10,
+  // Minimum total seats a section must have for the density filter to apply.
+  // Small sections (e.g., boxes, suites) are skipped to avoid false exclusions.
+  sectionDensityMinCapacity: 10,
 };
 //it will break map into seats
 function GetMapSeats(data) {
@@ -390,6 +398,56 @@ export const AttachRowSection = (
   let allAvailableSeats = GetMapSeats(mapData);
   let mapPlacesIndex = allAvailableSeats.map((x) => x.seatId);
   // fs.writeFileSync("debug/allAvailableSeats.json", JSON.stringify(allAvailableSeats));
+
+  // ── Section density filter ───────────────────────────────────────────
+  // Compare total capacity (map) vs available listings (facets) per section.
+  // Sections below the threshold are excluded automatically.
+  let excludedSectionsByDensity = new Set();
+
+  if (GLOBAL_FILTERS.sectionDensityThreshold > 0) {
+    // Total seats per section from venue map (full capacity)
+    const totalSeatsBySection = new Map();
+    for (const seat of allAvailableSeats) {
+      const sec = seat.section;
+      totalSeatsBySection.set(sec, (totalSeatsBySection.get(sec) || 0) + 1);
+    }
+
+    // Available seats per section from facets data
+    const availableSeatsBySection = new Map();
+    if (Array.isArray(data)) {
+      for (const facet of data) {
+        const sec = facet.section || '';
+        if (!sec) continue;
+        const placeCount = facet.places ? facet.places.length : 0;
+        availableSeatsBySection.set(sec, (availableSeatsBySection.get(sec) || 0) + placeCount);
+      }
+    }
+
+    // Evaluate each section
+    for (const [section, totalSeats] of totalSeatsBySection) {
+      // Skip small sections (boxes, suites, etc.) — too few seats for meaningful density
+      if (totalSeats < GLOBAL_FILTERS.sectionDensityMinCapacity) continue;
+
+      const availableSeats = availableSeatsBySection.get(section) || 0;
+      const density = availableSeats / totalSeats;
+
+      if (density < GLOBAL_FILTERS.sectionDensityThreshold) {
+        excludedSectionsByDensity.add(section);
+        console.log(
+          `[DensityFilter ${event.eventId}] Excluding section "${section}": ` +
+          `${availableSeats}/${totalSeats} available (${(density * 100).toFixed(1)}% < ${(GLOBAL_FILTERS.sectionDensityThreshold * 100).toFixed(0)}% threshold)`
+        );
+      }
+    }
+
+    if (excludedSectionsByDensity.size > 0) {
+      console.log(
+        `[DensityFilter ${event.eventId}] Excluded ${excludedSectionsByDensity.size} sparse sections out of ${totalSeatsBySection.size} total`
+      );
+    }
+  }
+  // ── End section density filter ───────────────────────────────────────
+
   let returnData = [];
   //get all seats number by seat id
   let customData = data
@@ -502,6 +560,11 @@ export const AttachRowSection = (
 
   const finalData = returnData
       .map((x) => {
+        // Section density exclusion — skip sections with too few available listings
+        if (excludedSectionsByDensity.has(x.section)) {
+          return undefined;
+        }
+
         let offerGet = offers.find((e) => e.offerId == x.offerId);
 
         // Check accessibility exclusion filters first
