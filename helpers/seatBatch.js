@@ -32,7 +32,9 @@ const GLOBAL_FILTERS = {
   sectionDensityThreshold: 0.10,
   // Minimum total seats a section must have for the density filter to apply.
   // Small sections (e.g., boxes, suites) are skipped to avoid false exclusions.
-  sectionDensityMinCapacity: 10,
+  sectionDensityMinCapacity: 50,
+  // Listings at or above this cost per ticket are never excluded by the density filter.
+  sectionDensityHighValueThreshold: 1000,
 };
 //it will break map into seats
 function GetMapSeats(data) {
@@ -560,12 +562,35 @@ export const AttachRowSection = (
 
   const finalData = returnData
       .map((x) => {
-        // Section density exclusion — skip sections with too few available listings
-        if (excludedSectionsByDensity.has(x.section)) {
-          return undefined;
-        }
-
         let offerGet = offers.find((e) => e.offerId == x.offerId);
+
+        // Section density exclusion — skip sections with too few available listings
+        // BUT keep high-value listings ($1,000+ per ticket) regardless
+        if (excludedSectionsByDensity.has(x.section)) {
+          if (offerGet) {
+            const charges = offerGet.charges || [];
+            const perOrderTotal = charges
+              .filter((c) => c?.fee_type ? c.fee_type === "PER ORDER" : c?.reason === "order_processing" || c?.reason === "delivery")
+              .reduce((sum, c) => sum + c.amount, 0);
+            const perTicketTotal = charges
+              .filter((c) => c?.fee_type ? c.fee_type !== "PER ORDER" : c?.reason !== "order_processing" && c?.reason !== "delivery")
+              .reduce((sum, c) => sum + c.amount, 0);
+            const seatCount = x.seats ? x.seats.length : 1;
+            const totalCost = (offerGet.faceValue || 0) + (perOrderTotal / seatCount) + perTicketTotal;
+
+            if (totalCost >= GLOBAL_FILTERS.sectionDensityHighValueThreshold) {
+              console.log(
+                `[DensityFilter ${event.eventId}] Keeping high-value listing in excluded section "${x.section}": ` +
+                `$${totalCost.toFixed(2)}/ticket >= $${GLOBAL_FILTERS.sectionDensityHighValueThreshold} threshold`
+              );
+              // Fall through — don't exclude this listing
+            } else {
+              return undefined;
+            }
+          } else {
+            return undefined;
+          }
+        }
 
         // Check accessibility exclusion filters first
         if (GLOBAL_FILTERS.excludeAccessibility) {
