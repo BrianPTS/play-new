@@ -1084,6 +1084,8 @@ export class ScraperManager {
 
           existingRowMap.set(rowKey, {
             _id: group._id,
+            section: group.section,
+            row: group.row,
             seatCount: group.seatCount,
             seats: extractedSeats,
             price: group.inventory?.listPrice,
@@ -1191,6 +1193,96 @@ export class ScraperManager {
           }
         }
 
+        // ------------------------------------------------------------------
+        // Reconciliation: match orphaned deletes/inserts by section+row.
+        // When seats change (e.g. 10→8), the seatRange in the rowKey differs
+        // so the old row appears as a delete and the new row as an insert.
+        // We detect these pairs and convert them to in-place updates so the
+        // inventoryId (and therefore the StubHub listing) is preserved.
+        // ------------------------------------------------------------------
+        const rowsToUpdateInPlace = []; // { existingId, existingInventoryId, newData }
+
+        if (rowsToDelete.length > 0 && rowsToInsert.length > 0) {
+          // Build a map from _id → existingData (including section/row)
+          const idToExisting = new Map();
+          for (const [, data] of existingRowMap) {
+            idToExisting.set(String(data._id), data);
+          }
+
+          // Group orphaned deletes by section+row
+          const deletesBySectionRow = new Map();
+          for (const deleteId of rowsToDelete) {
+            const existing = idToExisting.get(String(deleteId));
+            if (!existing) continue;
+            const key = `${existing.section}\0${existing.row}`;
+            if (!deletesBySectionRow.has(key)) {
+              deletesBySectionRow.set(key, []);
+            }
+            deletesBySectionRow.get(key).push({ _id: deleteId, ...existing });
+          }
+
+          // Group orphaned inserts by section+row
+          const insertsBySectionRow = new Map();
+          for (let i = 0; i < rowsToInsert.length; i++) {
+            const { data } = rowsToInsert[i];
+            const section = data.groupData.section;
+            const row = data.groupData.row;
+            const key = `${section}\0${row}`;
+            if (!insertsBySectionRow.has(key)) {
+              insertsBySectionRow.set(key, []);
+            }
+            insertsBySectionRow.get(key).push({ index: i, data });
+          }
+
+          // Match 1:1 pairs (same section+row with exactly one delete and one insert)
+          const deleteIndicesToRemove = new Set();
+          const insertIndicesToRemove = new Set();
+
+          for (const [sectionRowKey, deletes] of deletesBySectionRow) {
+            const inserts = insertsBySectionRow.get(sectionRowKey);
+            if (!inserts) continue;
+
+            if (deletes.length === 1 && inserts.length === 1) {
+              const del = deletes[0];
+              const ins = inserts[0];
+
+              // Preserve the existing inventoryId on the new data
+              ins.data.groupData.inventory.inventoryId = del.inventoryId;
+
+              rowsToUpdateInPlace.push({
+                existingId: del._id,
+                existingInventoryId: del.inventoryId,
+                newData: ins.data,
+              });
+
+              // Mark for removal from delete/insert arrays
+              deleteIndicesToRemove.add(String(del._id));
+              insertIndicesToRemove.add(ins.index);
+            }
+          }
+
+          // Remove reconciled items from rowsToDelete and rowsToInsert
+          if (deleteIndicesToRemove.size > 0) {
+            const originalDeleteCount = rowsToDelete.length;
+            const originalInsertCount = rowsToInsert.length;
+
+            // Filter in reverse index order for inserts to avoid shifting
+            const sortedInsertIndices = [...insertIndicesToRemove].sort((a, b) => b - a);
+            for (const idx of sortedInsertIndices) {
+              rowsToInsert.splice(idx, 1);
+            }
+
+            // Filter deletes by _id
+            for (let i = rowsToDelete.length - 1; i >= 0; i--) {
+              if (deleteIndicesToRemove.has(String(rowsToDelete[i]))) {
+                rowsToDelete.splice(i, 1);
+              }
+            }
+
+            console.log(`[RECONCILE ${eventId}] Matched ${rowsToUpdateInPlace.length} seat-change updates (preserved inventoryIds). Deletes: ${originalDeleteCount}→${rowsToDelete.length}, Inserts: ${originalInsertCount}→${rowsToInsert.length}`);
+          }
+        }
+
         // Log database operation summary at level 3
         if (LOG_LEVEL >= 3) {
           this.logWithTime(
@@ -1199,15 +1291,16 @@ export class ScraperManager {
           );
         }
         // Console log only when there are actual DB changes
-        if (rowsToDelete.length > 0 || rowsToUpdate.length > 0 || rowsToInsert.length > 0) {
-          console.log(`[DB OPS ${eventId}] ${rowsToDelete.length}D ${rowsToUpdate.length}U ${rowsToInsert.length}I (${unchangedRows} unchanged)`);
+        if (rowsToDelete.length > 0 || rowsToUpdate.length > 0 || rowsToInsert.length > 0 || rowsToUpdateInPlace.length > 0) {
+          console.log(`[DB OPS ${eventId}] ${rowsToDelete.length}D ${rowsToUpdate.length}U ${rowsToUpdateInPlace.length}P ${rowsToInsert.length}I (${unchangedRows} unchanged)`);
         }
 
         // Perform efficient updates only if there are changes
         if (
           rowsToDelete.length > 0 ||
           rowsToInsert.length > 0 ||
-          rowsToUpdate.length > 0
+          rowsToUpdate.length > 0 ||
+          rowsToUpdateInPlace.length > 0
         ) {
           // const result = JSON.stringify(rowsToInsert);
 
@@ -1439,6 +1532,81 @@ export class ScraperManager {
             // DB UPDATE log already covered by summary above
           }
 
+          // In-place updates for seat-change reconciled rows (preserves inventoryId)
+          if (rowsToUpdateInPlace.length > 0) {
+            let inPlaceUpdated = 0;
+            for (const { existingId, existingInventoryId, newData } of rowsToUpdateInPlace) {
+              try {
+                const group = newData.groupData;
+                const eventDateObj =
+                  typeof event_date === "string"
+                    ? new Date(event_date)
+                    : event_date;
+                const inHandDateObj = moment(eventDateObj).subtract(1, "day");
+                const formattedInHandDate = inHandDateObj.toISOString();
+                const increasedPrice = newData.price;
+
+                await ConsecutiveGroup.updateOne(
+                  { _id: existingId },
+                  {
+                    $set: {
+                      seatCount: group.inventory.quantity,
+                      seatRange: `${Math.min(...group.seats)}-${Math.max(...group.seats)}`,
+                      seats: group.seats.map((seatNumber) => ({
+                        number: seatNumber.toString(),
+                        inHandDate: formattedInHandDate,
+                        price: increasedPrice,
+                        mapping_id,
+                      })),
+                      "inventory.quantity": group.inventory.quantity,
+                      "inventory.section": group.section,
+                      "inventory.row": group.row,
+                      "inventory.listPrice": increasedPrice,
+                      "inventory.face_price": group.inventory.faceValue,
+                      "inventory.taxed_cost": group.inventory.taxedCost,
+                      "inventory.cost": group.inventory.cost,
+                      "inventory.splitType": group.inventory.splitType || "CUSTOM",
+                      "inventory.customSplit": group.inventory.customSplit ||
+                        `${Math.ceil(group.inventory.quantity / 2)},${group.inventory.quantity}`,
+                      "inventory.stockType": group.inventory.stockType || "MOBILE_TRANSFER",
+                      "inventory.hideSeatNumbers": group.inventory.hideSeatNumbers || true,
+                      "inventory.publicNotes": group.inventory.publicNotes,
+                      "inventory.notes": group.inventory.notes,
+                      "inventory.offerId": group.inventory.offerId,
+                      "inventory.inHandDate": formattedInHandDate,
+                      "inventory.tickets": group.inventory.tickets.map((ticket) => ({
+                        id: ticket.id,
+                        seatNumber: ticket.seatNumber,
+                        notes: ticket.notes,
+                        cost: ticket.cost,
+                        faceValue: ticket.faceValue,
+                        taxedCost: ticket.taxedCost,
+                        sellPrice:
+                          typeof ticket?.sellPrice === "number" && !isNaN(ticket?.sellPrice)
+                            ? ticket.sellPrice
+                            : parseFloat(ticket?.cost || ticket?.faceValue || 0),
+                        stockType: ticket.stockType,
+                        eventId: ticket.eventId,
+                        accountId: ticket.accountId,
+                        status: ticket.status,
+                        auditNote: ticket.auditNote,
+                        mapping_id,
+                      })),
+                    },
+                  }
+                ).session(session);
+
+                inPlaceUpdated++;
+              } catch (error) {
+                console.error(
+                  `[ERROR] Event ${eventId} - Failed to update ConsecutiveGroup in place (inventoryId ${existingInventoryId}):`,
+                  error.message
+                );
+              }
+            }
+            console.log(`[DB UPDATE-IN-PLACE ${eventId}] Updated ${inPlaceUpdated}/${rowsToUpdateInPlace.length} rows (inventoryIds preserved for StubHub PATCH)`);
+          }
+
           // Insert new/updated rows with new inventory IDs
           if (rowsToInsert.length > 0) {
             const groupsToInsert = rowsToInsert.map(({ data }) => {
@@ -1591,7 +1759,7 @@ export class ScraperManager {
 
         if (LOG_LEVEL >= 3) {
           // Provide a final summary of all database operations performed
-          const totalOperations = (rowsToDelete?.length || 0) + (rowsToUpdate?.length || 0) + (rowsToInsert?.length || 0);
+          const totalOperations = (rowsToDelete?.length || 0) + (rowsToUpdate?.length || 0) + (rowsToUpdateInPlace?.length || 0) + (rowsToInsert?.length || 0);
           const operationSummary = totalOperations > 0 
             ? `${totalOperations} total database operations performed` 
             : 'no database changes needed';
@@ -1604,7 +1772,7 @@ export class ScraperManager {
           );
         }
         // Event completion - only log slow events (>5s) or events with DB ops
-        const totalOps = (rowsToDelete?.length || 0) + (rowsToUpdate?.length || 0) + (rowsToInsert?.length || 0);
+        const totalOps = (rowsToDelete?.length || 0) + (rowsToUpdate?.length || 0) + (rowsToUpdateInPlace?.length || 0) + (rowsToInsert?.length || 0);
         const elapsed = (performance.now() - startTime).toFixed(0);
         if (totalOps > 0 || elapsed > 5000) {
           console.log(`[DONE ${eventId}] ${elapsed}ms - ${totalOps > 0 ? `${totalOps} ops` : 'slow'}`);
