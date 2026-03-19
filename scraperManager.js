@@ -992,8 +992,14 @@ export class ScraperManager {
       const venue_name = event.Venue;
       const event_date = event.Event_DateTime;
       const gameDayActive = isGameDay(event_date);
+
+      // Game day: boost the markup percentage (e.g. 35% → 45%), not a separate multiplier
+      const effectiveMarkupPct = gameDayActive
+        ? priceIncreasePercentage + GAME_DAY_MARKUP_PCT
+        : priceIncreasePercentage;
+
       if (gameDayActive) {
-        console.log(`[GameDay ${eventId}] Event "${event_name}" is today — applying +${GAME_DAY_MARKUP_PCT}% game day markup`);
+        console.log(`[GameDay ${eventId}] Event "${event_name}" is today — markup ${priceIncreasePercentage}% → ${effectiveMarkupPct}%`);
       }
 
       if (!mapping_id) {
@@ -1138,14 +1144,9 @@ export class ScraperManager {
           const rowKey = `${group.section}-${group.row}-${seatRange}`;
           
           const basePrice = parseFloat(group.inventory.listPrice);
-          let increasedPrice = basePrice < 35
+          const increasedPrice = basePrice < 35
             ? basePrice + 15
-            : basePrice * (1 + priceIncreasePercentage / 100);
-
-          // Game day markup: add extra % for events happening today (EST)
-          if (gameDayActive) {
-            increasedPrice = increasedPrice * (1 + GAME_DAY_MARKUP_PCT / 100);
-          }
+            : basePrice * (1 + effectiveMarkupPct / 100);
 
           newRowMap.set(rowKey, {
             seatCount: group.inventory.quantity,
