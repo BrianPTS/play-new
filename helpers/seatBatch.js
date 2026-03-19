@@ -225,7 +225,7 @@ function getSplitType(arr, offer) {
   }
 }
 
-function CreateInventoryAndLine(data, offer, event, descriptions, resaleClassification = new Map()) {
+function CreateInventoryAndLine(data, offer, event, descriptions, resaleClassification = new Map(), debugSplitLog = null) {
 
   let _descriptions = descriptions.find(
     (x) => x.descriptionId == data?.descriptionId
@@ -339,6 +339,25 @@ function CreateInventoryAndLine(data, offer, event, descriptions, resaleClassifi
   let totalFees = perOrderPerSeat + perTicketTotal;
   let totalCost = faceValue + totalFees;
 
+  const isResale = offer?.inventoryType?.toLowerCase() === "resale";
+  const derivedSplit = getSplitType(data?.seats, offer);
+
+  // Debug: capture TM split qualifier vs our derived split for resale listings
+  if (isResale && debugSplitLog) {
+    debugSplitLog.push({
+      section: data?.section,
+      row: data?.row,
+      seats: data?.seats,
+      quantity: data?.seats.length,
+      offerId: data?.offerId,
+      tmQualifier: offer?.ticketTypeUnsoldQualifier || null,
+      derivedSplit: derivedSplit,
+      faceValue: faceValue,
+      totalCost: totalCost,
+      resaleType: resaleClassification.get(data?.offerId) || "unknown",
+    });
+  }
+
   return {
     inventory: {
       quantity: data?.seats.length,
@@ -356,15 +375,15 @@ function CreateInventoryAndLine(data, offer, event, descriptions, resaleClassifi
       notes: "-tnow -tmplus -stub",
       tags: "AWS",
       offerId: data?.offerId,
-      splitType: offer?.inventoryType?.toLowerCase() === "resale" ? "DEFAULT": "NEVERLEAVEONE" ,
-      resaleType: offer?.inventoryType?.toLowerCase() === "resale"
+      splitType: isResale ? "DEFAULT": "NEVERLEAVEONE" ,
+      resaleType: isResale
         ? (resaleClassification.get(data?.offerId) || "unknown")
         : null,
       publicNotes: "xfer" + allDescriptions,
       listPrice: totalCost,
       originalFaceValue: faceValue,
       totalFees: totalFees,
-      customSplit: getSplitType(data?.seats, offer),
+      customSplit: derivedSplit,
       tickets: data?.seats.map((y) => {
         return {
           id: 0,
@@ -565,6 +584,9 @@ export const AttachRowSection = (
 
   //attach offer
 
+  // Debug: collect split info for all resale listings
+  const debugSplitLog = [];
+
   const finalData = returnData
       .map((x) => {
         let offerGet = offers.find((e) => e.offerId == x.offerId);
@@ -727,7 +749,7 @@ export const AttachRowSection = (
           } else if (offerGet?.protected == true) {
             return undefined;
           } else {
-            return CreateInventoryAndLine(x, offerGet, event, descriptions, resaleClassification);
+            return CreateInventoryAndLine(x, offerGet, event, descriptions, resaleClassification, debugSplitLog);
           }
         } else {
           return undefined;
@@ -760,10 +782,55 @@ export const AttachRowSection = (
       });
 
   // fs.writeFileSync(`debug/seatBatch_${event.eventId}.json`, JSON.stringify(finalData, null, 2));
-  
+
   // // Debug: Final processed data after all filters
   // fs.writeFileSync(`debug/finalProcessed_${event.eventId}.json`, JSON.stringify(finalData, null, 2));
   // console.log(`Final processed data written to debug/finalProcessed_${event.eventId}.json - Total items: ${finalData.length}`);
+
+  // ── Debug: Resale split type summary ─────────────────────────────────
+  if (debugSplitLog.length > 0) {
+    // Group by TM qualifier to show distribution
+    const qualifierCounts = {};
+    for (const entry of debugSplitLog) {
+      const key = entry.tmQualifier || "(none)";
+      if (!qualifierCounts[key]) qualifierCounts[key] = 0;
+      qualifierCounts[key]++;
+    }
+    const qualifierSummary = Object.entries(qualifierCounts)
+      .map(([q, c]) => `${q}: ${c}`)
+      .join(", ");
+
+    console.log(
+      `[SplitDebug ${event.eventId}] ${debugSplitLog.length} resale listings — TM qualifiers: { ${qualifierSummary} }`
+    );
+
+    // Log each resale listing's split info
+    for (const entry of debugSplitLog) {
+      console.log(
+        `[SplitDebug ${event.eventId}] ${entry.section} Row ${entry.row} Seats [${entry.seats.join(",")}] ` +
+        `qty=${entry.quantity} | TM qualifier: ${entry.tmQualifier || "(none)"} | ` +
+        `derived split: ${entry.derivedSplit} | $${entry.totalCost.toFixed(2)} | ${entry.resaleType}`
+      );
+    }
+
+    // Write debug JSON (once per event)
+    try {
+      const debugDir = './debug';
+      if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir, { recursive: true });
+      const splitDebugPath = `${debugDir}/resale_splits_${event.eventId}.json`;
+      fs.writeFileSync(splitDebugPath, JSON.stringify({
+        eventId: event.eventId,
+        capturedAt: new Date().toISOString(),
+        totalResaleListings: debugSplitLog.length,
+        qualifierDistribution: qualifierCounts,
+        listings: debugSplitLog,
+      }, null, 2));
+      console.log(`[SplitDebug ${event.eventId}] Split data written to ${splitDebugPath}`);
+    } catch (debugErr) {
+      console.warn(`[SplitDebug] Failed to write debug file: ${debugErr.message}`);
+    }
+  }
+  // ── End split debug ──────────────────────────────────────────────────
 
   return finalData;
 };
