@@ -1046,6 +1046,12 @@ async function callTicketmasterAPI(facetHeader, proxyAgent, eventId, event, mapH
             currency: o.currency,
             protected: o.protected,
             ticketTypeUnsoldQualifier: o.ticketTypeUnsoldQualifier,
+            sellableQuantities: o.sellableQuantities,
+            listingId: o.listingId,
+            section: o.section,
+            row: o.row,
+            seatFrom: o.seatFrom,
+            seatTo: o.seatTo,
             // Capture ALL top-level keys so we can see what else TM sends
             _allKeys: Object.keys(o),
           })),

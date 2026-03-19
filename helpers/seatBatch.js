@@ -342,7 +342,20 @@ function CreateInventoryAndLine(data, offer, event, descriptions, resaleClassifi
   const isResale = offer?.inventoryType?.toLowerCase() === "resale";
   const derivedSplit = getSplitType(data?.seats, offer);
 
-  // Debug: capture TM split qualifier vs our derived split for resale listings
+  // Use TM's sellableQuantities for resale listings (exact split from the reseller),
+  // fall back to our derived split for primary or when sellableQuantities is missing.
+  const tmSellableQuantities = offer?.sellableQuantities;
+  let customSplit;
+  let splitSource;
+  if (isResale && Array.isArray(tmSellableQuantities) && tmSellableQuantities.length > 0) {
+    customSplit = tmSellableQuantities.join(",");
+    splitSource = "tm_sellableQuantities";
+  } else {
+    customSplit = derivedSplit;
+    splitSource = "derived";
+  }
+
+  // Debug: capture TM split data vs our derived split for resale listings
   if (isResale && debugSplitLog) {
     debugSplitLog.push({
       section: data?.section,
@@ -350,8 +363,14 @@ function CreateInventoryAndLine(data, offer, event, descriptions, resaleClassifi
       seats: data?.seats,
       quantity: data?.seats.length,
       offerId: data?.offerId,
+      tmSellableQuantities: tmSellableQuantities || null,
       tmQualifier: offer?.ticketTypeUnsoldQualifier || null,
       derivedSplit: derivedSplit,
+      actualSplit: customSplit,
+      splitSource: splitSource,
+      seatFrom: offer?.seatFrom || null,
+      seatTo: offer?.seatTo || null,
+      listingId: offer?.listingId || null,
       faceValue: faceValue,
       totalCost: totalCost,
       resaleType: resaleClassification.get(data?.offerId) || "unknown",
@@ -383,7 +402,7 @@ function CreateInventoryAndLine(data, offer, event, descriptions, resaleClassifi
       listPrice: totalCost,
       originalFaceValue: faceValue,
       totalFees: totalFees,
-      customSplit: derivedSplit,
+      customSplit: customSplit,
       tickets: data?.seats.map((y) => {
         return {
           id: 0,
@@ -789,27 +808,38 @@ export const AttachRowSection = (
 
   // ── Debug: Resale split type summary ─────────────────────────────────
   if (debugSplitLog.length > 0) {
-    // Group by TM qualifier to show distribution
-    const qualifierCounts = {};
+    // Group by split source and sellableQuantities pattern
+    const sourceCounts = { tm_sellableQuantities: 0, derived: 0 };
+    const sqPatternCounts = {};
     for (const entry of debugSplitLog) {
-      const key = entry.tmQualifier || "(none)";
-      if (!qualifierCounts[key]) qualifierCounts[key] = 0;
-      qualifierCounts[key]++;
+      sourceCounts[entry.splitSource] = (sourceCounts[entry.splitSource] || 0) + 1;
+      const sqKey = entry.tmSellableQuantities
+        ? `[${entry.tmSellableQuantities.join(",")}]`
+        : "(none)";
+      sqPatternCounts[sqKey] = (sqPatternCounts[sqKey] || 0) + 1;
     }
-    const qualifierSummary = Object.entries(qualifierCounts)
+
+    const sqSummary = Object.entries(sqPatternCounts)
+      .sort((a, b) => b[1] - a[1])
       .map(([q, c]) => `${q}: ${c}`)
       .join(", ");
 
     console.log(
-      `[SplitDebug ${event.eventId}] ${debugSplitLog.length} resale listings — TM qualifiers: { ${qualifierSummary} }`
+      `[SplitDebug ${event.eventId}] ${debugSplitLog.length} resale listings — ` +
+      `${sourceCounts.tm_sellableQuantities} using TM sellableQuantities, ` +
+      `${sourceCounts.derived} using derived`
+    );
+    console.log(
+      `[SplitDebug ${event.eventId}] sellableQuantities distribution: { ${sqSummary} }`
     );
 
     // Log each resale listing's split info
     for (const entry of debugSplitLog) {
       console.log(
         `[SplitDebug ${event.eventId}] ${entry.section} Row ${entry.row} Seats [${entry.seats.join(",")}] ` +
-        `qty=${entry.quantity} | TM qualifier: ${entry.tmQualifier || "(none)"} | ` +
-        `derived split: ${entry.derivedSplit} | $${entry.totalCost.toFixed(2)} | ${entry.resaleType}`
+        `qty=${entry.quantity} | TM split: [${entry.tmSellableQuantities ? entry.tmSellableQuantities.join(",") : "N/A"}] | ` +
+        `derived: ${entry.derivedSplit} | actual: ${entry.actualSplit} (${entry.splitSource}) | ` +
+        `$${entry.totalCost.toFixed(2)} | ${entry.resaleType}`
       );
     }
 
@@ -822,7 +852,8 @@ export const AttachRowSection = (
         eventId: event.eventId,
         capturedAt: new Date().toISOString(),
         totalResaleListings: debugSplitLog.length,
-        qualifierDistribution: qualifierCounts,
+        sourceCounts: sourceCounts,
+        sellableQuantitiesDistribution: sqPatternCounts,
         listings: debugSplitLog,
       }, null, 2));
       console.log(`[SplitDebug ${event.eventId}] Split data written to ${splitDebugPath}`);
