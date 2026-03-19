@@ -35,6 +35,11 @@ const GLOBAL_FILTERS = {
   sectionDensityMinCapacity: 50,
   // Listings at or above this cost per ticket are never excluded by the density filter.
   sectionDensityHighValueThreshold: 1000,
+
+  // Game day markup: additional % applied to all listings when the event is today (EST).
+  // Applied automatically at 12:01 AM ET on the event date. Set to 0 to disable.
+  // NOTE: Applied in scraperManager.js via the GAME_DAY_MARKUP_PCT constant.
+  gameDayMarkupPercentage: 10,
 };
 //it will break map into seats
 function GetMapSeats(data) {

@@ -15,6 +15,24 @@ import _ from 'lodash';
 import InventoryApi from './utils/inventoryApi.js';
 import { cleanup as cleanupBrowsers, browserPagePool } from './browser-cookies.js';
 // CSV upload functionality removed
+// Game day markup: additional % added to listings when the event is today (EST)
+const GAME_DAY_MARKUP_PCT = 10;
+
+/**
+ * Check if an event date falls on today in US Eastern time (EST/EDT).
+ * Returns true starting at 12:01 AM ET on the event date.
+ */
+function isGameDay(eventDateTime) {
+  if (!eventDateTime) return false;
+  const eventDate = new Date(eventDateTime);
+  const now = new Date();
+  // Format both dates in America/New_York to compare calendar dates
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const todayET = fmt.format(now);
+  const eventDayET = fmt.format(eventDate);
+  return todayET === eventDayET;
+}
+
 let inventoryIdCounter = 0;
 
 function generateUniqueInventoryId() {
@@ -973,6 +991,10 @@ export class ScraperManager {
       const event_name = event.Event_Name;
       const venue_name = event.Venue;
       const event_date = event.Event_DateTime;
+      const gameDayActive = isGameDay(event_date);
+      if (gameDayActive) {
+        console.log(`[GameDay ${eventId}] Event "${event_name}" is today — applying +${GAME_DAY_MARKUP_PCT}% game day markup`);
+      }
 
       if (!mapping_id) {
         throw new Error(`Event ${eventId} is missing required mapping_id`);
@@ -1116,9 +1138,14 @@ export class ScraperManager {
           const rowKey = `${group.section}-${group.row}-${seatRange}`;
           
           const basePrice = parseFloat(group.inventory.listPrice);
-          const increasedPrice = basePrice < 35 
-            ? basePrice + 15 
+          let increasedPrice = basePrice < 35
+            ? basePrice + 15
             : basePrice * (1 + priceIncreasePercentage / 100);
+
+          // Game day markup: add extra % for events happening today (EST)
+          if (gameDayActive) {
+            increasedPrice = increasedPrice * (1 + GAME_DAY_MARKUP_PCT / 100);
+          }
 
           newRowMap.set(rowKey, {
             seatCount: group.inventory.quantity,
