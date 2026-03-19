@@ -440,6 +440,8 @@ export const AttachRowSection = (
   descriptions,
   resaleClassification = new Map()
 ) => {
+  // Debug: track split source for resale listings
+  const debugSplitLog = [];
   let allAvailableSeats = GetMapSeats(mapData);
   let mapPlacesIndex = allAvailableSeats.map((x) => x.seatId);
   // fs.writeFileSync("debug/allAvailableSeats.json", JSON.stringify(allAvailableSeats));
@@ -773,7 +775,7 @@ export const AttachRowSection = (
         } else {
           return undefined;
         }
-        
+
       })
       .filter((x) => x != undefined)
       .filter((obj, index, self) => {
@@ -801,10 +803,6 @@ export const AttachRowSection = (
       });
 
   // fs.writeFileSync(`debug/seatBatch_${event.eventId}.json`, JSON.stringify(finalData, null, 2));
-
-  // // Debug: Final processed data after all filters
-  // fs.writeFileSync(`debug/finalProcessed_${event.eventId}.json`, JSON.stringify(finalData, null, 2));
-  // console.log(`Final processed data written to debug/finalProcessed_${event.eventId}.json - Total items: ${finalData.length}`);
 
   // ── Debug: Resale split type summary ─────────────────────────────────
   if (debugSplitLog.length > 0) {
