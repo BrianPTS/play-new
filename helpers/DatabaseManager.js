@@ -55,6 +55,12 @@ class DatabaseManager {
           (sum, group) => sum + (group.inventory?.quantity || 0), 0
         );
 
+        // Calculate venue capacity and availability percentage
+        const venueCapacity = scrapeResult.venueCapacity || 0;
+        const availabilityPercentage = venueCapacity > 0
+          ? Math.round((currentTicketCount / venueCapacity) * 100)
+          : null;
+
         // Calculate per-type seat and row counts
         const standardSeats = scrapeResult
           .filter(g => g.inventory?.splitType === 'NEVERLEAVEONE')
@@ -84,6 +90,8 @@ class DatabaseManager {
           {
             $set: {
               Available_Seats: currentTicketCount,
+              Venue_Capacity: venueCapacity || undefined,
+              Availability_Percentage: availabilityPercentage,
               Standard_Seats: standardSeats,
               Resale_Seats: resaleSeats,
               Standard_Rows: standardRows,

@@ -33,6 +33,14 @@ const eventSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    Venue_Capacity: {
+      type: Number,
+      default: 0,
+    },
+    Availability_Percentage: {
+      type: Number,
+      default: null,
+    },
     Standard_Seats: {
       type: Number,
       default: 0,

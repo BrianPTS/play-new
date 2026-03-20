@@ -1038,6 +1038,16 @@ export class ScraperManager {
         (sum, group) => sum + (group.inventory?.quantity || 0), 0
       );
 
+      // Calculate venue capacity and availability percentage
+      const venueCapacity = scrapeResult.venueCapacity || 0;
+      const availabilityPercentage = venueCapacity > 0
+        ? Math.round((currentTicketCount / venueCapacity) * 100)
+        : null;
+
+      if (availabilityPercentage !== null) {
+        console.log(`[Availability ${eventId}] ${currentTicketCount}/${venueCapacity} seats available (${availabilityPercentage}%)`);
+      }
+
       // Calculate per-type seat and row counts
       const standardSeats = validScrapeResult
         .filter(g => g.inventory?.splitType === 'NEVERLEAVEONE')
@@ -1056,6 +1066,8 @@ export class ScraperManager {
           {
             $set: {
               Available_Seats: currentTicketCount,
+              Venue_Capacity: venueCapacity || undefined,
+              Availability_Percentage: availabilityPercentage,
               Standard_Seats: standardSeats,
               Resale_Seats: resaleSeats,
               Standard_Rows: standardRows,

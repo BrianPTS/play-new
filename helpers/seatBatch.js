@@ -861,5 +861,5 @@ export const AttachRowSection = (
   }
   // ── End split debug ──────────────────────────────────────────────────
 
-  return finalData;
+  return { listings: finalData, venueCapacity: allAvailableSeats.length };
 };
