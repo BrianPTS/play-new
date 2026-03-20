@@ -17,6 +17,7 @@ import adminRoutes from "./routes/adminRoutes.js";
 import setupGlobals from "./setup.js";
 import scraperManager from "./scraperManager.js"; // Added for command-line start and graceful shutdown
 import { cleanup as cleanupBrowsers, cleanupApiBrowser } from "./browser-cookies.js";
+import salesPoller from "./utils/salesPoller.js";
 
 dotenv.config();
 
@@ -92,6 +93,9 @@ function startServerWithPortFallback(currentPort, attempt = 0, maxAttempts = 20)
     global.serverInstance = server; // Make it globally accessible for restart logic
     console.log(`Server running on port ${currentPort}`);
 
+    // Start sales poller (runs regardless of scraper state)
+    salesPoller.start();
+
     // Check for --start-scraper argument
     if (process.argv.includes('--start-scraper')) {
       console.log('Command-line argument --start-scraper detected. Attempting to start scraper...');
@@ -134,6 +138,9 @@ async function gracefulShutdown(signal) {
   }
   isShuttingDown = true;
   console.log(`${signal} received. Starting graceful shutdown...`);
+
+  // 0. Stop sales poller
+  salesPoller.stop();
 
   // 1. Stop the scraper first (prevents new browser launches)
   if (scraperManager && typeof scraperManager.stopContinuousScraping === 'function') {
